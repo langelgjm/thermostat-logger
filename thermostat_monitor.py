@@ -50,12 +50,16 @@ def cb_therm_status(channel, initial=False):
                 print "Heating turned OFF."
                 # append thermostat_status data point to plot
                 # Need to pass it both the time and the value
-                url = graph_therm(t, 0, initial)
+		therm_status = 0
+                url = graph_therm(t, therm_status, initial)
         else:
                 print "Heating turned ON."
                 # append thermostat_status data point to plot
-                url = graph_therm(t, 1, initial)
-        return url
+		therm_status = 1
+                url = graph_therm(t, therm_status, initial)
+	global prev_therm_status
+	prev_therm_status = therm_status 
+        return therm_status
 
 def get_analog_value(channel):
   adc = spi.xfer2([1,(8+channel)<<4,0])
@@ -81,13 +85,13 @@ def graph_therm(timestamp, value, initial=False):
         print('Appending data to Plotly graph...')
         py.sign_in(config_dict['plotly_userid'], config_dict['plotly_apikey'])
         # If this isn't the very first data point, create a pseudo-reading
-	# that happens one second before the true reading, and has the opposite value
+	# that happens one second before the true reading, and has the previous thermostat status value 
 	# I.e., when an interrupt occurs, graph the preceding value
 	if initial == False:
 		timestamp = [timestamp]
 		timestamp.insert(0, timestamp[0] - datetime.timedelta(seconds=1))	
 		value = [value]
-		value.insert(0, int(not(value[0]))) 
+		value.insert(0, prev_therm_status) 
         scatter1 = Scatter(x=timestamp,
                    y=value,
                    name='Thermostat Status')
