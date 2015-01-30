@@ -9,6 +9,8 @@ import plotly.plotly as py
 from plotly.graph_objs import Scatter, Data, Layout, XAxis, YAxis, Figure
 import ConfigParser
 from retrying import retry
+from collections import deque
+from numpy import median
 
 # TODO
 # check for outliers in temperature measurement before plotting/logging
@@ -203,33 +205,73 @@ def report_temp(i2c_addr, mode):
 	if mode == 0:
 		temp_raw = normal_temp_read(i2c_addr)
 	else:
-		temp_raw = one_shot_temp_read(i2c_addr)
-	
+		temp_raw = one_shot_temp_read(i2c_addr)	
 	if temp_raw is None:
-		print "Couldn't get temperature!"
-		return None, None
+		return None
 	else:		
 		# multiply by 13 bit tick size
 		temp_c = temp_raw * ADT7410_UNIT_13
 		temp_f = temp_c * 1.8 + 32.0
 		return temp_f
 
+def is_outlier(temp):
+	'''
+	Return a boolean value indicating whether the given temperature is an outlier or not, 
+	using median absolute deviation to detect outliers.
+	'''
+	# We store the deques, etc. in function attributes to make this function stateful
+	if len(is_outlier.mad) == is_outlier.window:
+		mad = median(is_outlier.mad)
+		# In order to avoid divide by zero errors...
+		if mad == 0:
+			mad = 0.1125 # The smallest valid unit change (in F)
+		# Get the absolute deviation from the median
+		abs_dev = abs(temp - median(is_outlier.med))
+		z = abs_dev / mad
+		print z
+		if z >= is_outlier.threshold:
+			is_outlier.misses += 1
+			if is_outlier.misses >= is_outlier.reset:
+				# In the case of a large, fast temperature swings that then settle, reset the deques and begin refilling them.
+				# This avoids getting stuck if there is such a swing.
+				# Re-initialization of is_outlier function
+				is_outlier.misses = 0 #reset counter
+				is_outlier.med = deque(maxlen=window) # clear deques
+				is_outlier.mad = deque(maxlen=window)
+			return True
+	# As long as the median deque is full, append to the MAD deque
+	if len(is_outlier.med) == is_outlier.window:
+		is_outlier.mad.append(abs(temp - median(is_outlier.med)))
+	# If median deque isn't yet full, continue filling it
+	#else:
+	#This only happens once we're sure it's a valid temperature
+	is_outlier.med.append(temp)
+	is_outlier.misses = 0 #reset counter of consecutive misses
+	return False
+
 def cb_therm_status(channel, prev_therm_status = None, interrupt=True):
-	'''Return a timestamp, thermostat status, and temperature.
+	'''
+	Return a timestamp, thermostat status, and temperature.
 	Can be used normally and as the interrupt callback for RPi.GPIO event detection
 	'''
 	t = datetime.datetime.now()
 	print str(t)
 	temp = report_temp(i2c_addr, mode)
-	print temp, "F"
 	if GPIO.input(channel):
 		print "HVAC OFF"
 		therm_status = 0
 	else:
 		print "HVAC ON"
 		therm_status = 1
-	# Write log entry
-	f.write("{},{},{}\n".format(t, therm_status, temp))
+	# Check if temp is an outlier in a single statement here.
+	if (temp is not None) and (is_outlier(temp) == False):
+		print temp, "F"
+		# Write log entry
+		f.write("{},{},{}\n".format(t, therm_status, temp))
+	else:
+		print "Couldn't get a valid temperature!"
+		# Write log entry
+		f.write("{},{},{}\n".format(t, therm_status, "NA"))
 	f.flush()
 	url = graph_therm(t, therm_status, temp, prev_therm_status, interrupt)
 	return t, therm_status, temp
@@ -306,6 +348,14 @@ def main():
 		print "ADT7410 manufacturer ID:",bin(dev_id['manuf_id'])
 		print "ADT7410 silicon revision:",bin(dev_id['si_rev'])
 		print "ADT7410 current device configuration:",bin(get_dev_conf(i2c_addr))
+
+		# Initialization of is_outlier function
+		is_outlier.window = 3 # set the window for median calculations
+		is_outlier.threshold = 6 # set the threshold multiplier for detecting outliers
+		is_outlier.misses = 0
+		is_outlier.reset = 5 # threshold for consecutive misses before resetting deques
+		is_outlier.med = deque(maxlen=window)
+		is_outlier.mad = deque(maxlen=window)
 
 		# Define this prior to entering loop. Don't need to define it prior to setting up event detection,
 		# because the functions that use it have default parameter values.
