@@ -236,8 +236,8 @@ def is_outlier(temp):
 				# This avoids getting stuck if there is such a swing.
 				# Re-initialization of is_outlier function
 				is_outlier.misses = 0 #reset counter
-				is_outlier.med = deque(maxlen=window) # clear deques
-				is_outlier.mad = deque(maxlen=window)
+				is_outlier.med = deque(maxlen=is_outlier.window) # clear deques
+				is_outlier.mad = deque(maxlen=is_outlier.window)
 			return True
 	# As long as the median deque is full, append to the MAD deque
 	if len(is_outlier.med) == is_outlier.window:
@@ -354,8 +354,8 @@ def main():
 		is_outlier.threshold = 6 # set the threshold multiplier for detecting outliers
 		is_outlier.misses = 0
 		is_outlier.reset = 5 # threshold for consecutive misses before resetting deques
-		is_outlier.med = deque(maxlen=window)
-		is_outlier.mad = deque(maxlen=window)
+		is_outlier.med = deque(maxlen=is_outlier.window)
+		is_outlier.mad = deque(maxlen=is_outlier.window)
 
 		# Define this prior to entering loop. Don't need to define it prior to setting up event detection,
 		# because the functions that use it have default parameter values.
